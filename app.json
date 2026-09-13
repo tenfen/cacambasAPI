@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "scheme": "cacambas",
+    "extra": {
+      "eas": {
+        "projectId": "48f7f949-a6a8-4385-8a19-b3dd7269a2e0"
+      }
+    },
+    "android": {
+      "package": "com.crtenfen.apicacambas"
+    }
+  }
+}
