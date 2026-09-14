@@ -1,6 +1,8 @@
 import AddressesModel from "../models/addresses.js";
 import UserModel from "../models/users.js";
 
+
+
 //Criar endereço do usuário
 export async function createAddressesUser(req, res) {
     const getLastAddresses = await AddressesModel.findOne({}).sort({addressId: -1}).limit(1)
