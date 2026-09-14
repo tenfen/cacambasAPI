@@ -42,7 +42,6 @@
     "jsonwebtoken": "^9.0.0",
     "mercadopago": "^3.6.1",
     "mongoose": "^8.24.4",
-    "mongoose-auto-increment": "^5.0.1",
     "nodemailer": "^7.0.5",
     "or": "^0.2.0",
     "react-native-fs": "^2.20.0",
