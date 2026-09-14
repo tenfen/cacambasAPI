@@ -2,7 +2,7 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import UsersModel from "../models/users.js";
-import authConfig from "../config/auth.json" assert { type: "json" };
+import authConfig from "../config/auth.json" with { type: "json" };
 
 export function signIn(req, res) {
     return res.status(200).send(req.decoded);
