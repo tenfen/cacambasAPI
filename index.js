@@ -12,10 +12,21 @@ import compression from "compression";
 import connectMongo from "./src/models/mongo.js";
 import cors from "cors";
 import express from "express";
+import "express-async-errors";
 import fileupload from "express-fileupload";
 // Safety
 import middleware from "./src/middlewares/middleware.js";
 import response from "default-api-response-node";
+
+// Última linha de defesa: nunca deixa um erro fora do ciclo request/response
+// (ex: promise sem catch em um serviço) derrubar o processo inteiro.
+process.on("unhandledRejection", (reason) => {
+  console.error("UNHANDLED REJECTION:", reason);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT EXCEPTION:", err);
+});
 
 const app = express();
 
@@ -66,6 +77,7 @@ app.use("/v1/cliente", v1.cliente);
 app.use("/v1/upload", v1.upload)
 app.use("/v1/addresses", v1.addresses);
 app.use("/v1/payment", v1.payment);
+app.use("/v1/security", v1.security);
 
 app.get("/", (req, res) => {
   res.success("Bem Vindo a API do projeto Cacambas");
@@ -73,6 +85,19 @@ app.get("/", (req, res) => {
 
 app.get("/healthz", (req, res) => {
   res.success("Healthz OK");
+});
+
+// Precisa ser o último app.use: captura qualquer erro (síncrono ou de rota
+// async, via express-async-errors) que os controllers não tratarem, e
+// responde com erro em vez de deixar a requisição travar ou o processo cair.
+app.use((err, req, res, next) => {
+  console.error("ERRO NÃO TRATADO:", err);
+
+  if (res.headersSent) {
+    return next(err);
+  }
+
+  return res.error("Erro interno no servidor.");
 });
 
 console.log("🔧 API Config:");
