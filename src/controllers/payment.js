@@ -106,12 +106,14 @@ export async function createCheckout(req, res) {
       });
     }
 
-    if (user.accountStatus === "active") {
-      return res.status(409).json({
-        success: false,
-        message: "Este usuário já possui acesso ativo.",
-      });
-    }
+    /*
+     * Usuário já ativo pode criar um novo checkout para renovar
+     * antecipadamente (ex: assinatura vence amanhã e ele já quer pagar).
+     * Por isso não bloqueamos aqui — só não rebaixamos o status dele
+     * mais abaixo enquanto o pagamento está só "pendente", pra não
+     * cortar o acesso de quem ainda está dentro do período pago.
+     */
+    const jaEstavaAtivo = user.accountStatus === "active";
 
     const paymentId = new mongoose.Types.ObjectId();
 
@@ -137,16 +139,18 @@ export async function createCheckout(req, res) {
 
     await payment.save();
 
-    await UserModel.updateOne(
-      { userId: user.userId },
-      {
-        $set: {
-          accountStatus: "pending_payment",
-          subscriptionStatus: "pending",
-          billingProvider: "mercadopago",
-        },
-      }
-    );
+    if (!jaEstavaAtivo) {
+      await UserModel.updateOne(
+        { userId: user.userId },
+        {
+          $set: {
+            accountStatus: "pending_payment",
+            subscriptionStatus: "pending",
+            billingProvider: "mercadopago",
+          },
+        }
+      );
+    }
 
     return res.status(201).json({
       success: true,
@@ -267,8 +271,20 @@ export async function mercadoPagoWebhook(req, res) {
     }
 
     if (mercadoPagoPayment.status === "approved") {
-      const periodStart = new Date();
-      const periodEnd = new Date();
+      const now = new Date();
+
+      /*
+       * Renovação antecipada: se o período atual ainda não venceu,
+       * soma o novo mês a partir do vencimento existente em vez de
+       * a partir de hoje, para não descartar os dias que já foram pagos.
+       */
+      const periodoAtualAindaValido =
+        user.currentPeriodEnd && new Date(user.currentPeriodEnd) > now;
+
+      const periodStart = now;
+      const periodEnd = new Date(
+        periodoAtualAindaValido ? user.currentPeriodEnd : now
+      );
 
       periodEnd.setMonth(periodEnd.getMonth() + 1);
 

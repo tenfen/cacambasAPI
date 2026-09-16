@@ -32,24 +32,19 @@ export async function getAllUsers(req, res) {
 //Consultar usuário pelo ID
 
 export async function getUserById(req, res) {
-  const userId  = req.params.userId;  
-  try {
-    const user = await UserModel.find({ userId: userId }).then(user => {
-      // Faça algo com os resultados      
-      return res.success("Usuário consultado com sucesso!", user);
-    }).catch(err => {
-      // Trate o erro
-      if (user === false) {
-        return res.error("Erro ao consultar o usuário");
-      } else if (!user) {
-        return res.badRequest("Usuário não encontrado");
-      }
-    });
-  } catch (err) {
-      res.status(500).json(err);
-      return res
-  }
+  const userId = req.params.userId;
 
+  try {
+    const user = await UserModel.findOne({ userId: parseInt(userId) }).select('-userPass');
+
+    if (!user) {
+      return res.badRequest("Usuário não encontrado");
+    }
+
+    return res.success("Usuário consultado com sucesso!", user);
+  } catch (err) {
+    return res.status(500).json(err);
+  }
 }
 
 //Criar usuário Novo
@@ -268,22 +263,20 @@ export async function requestPasswordReset(req, res) {
     // Isso permite invalidar tokens após o uso ou antes da expiração.
     // Ex: await PasswordResetTokenModel.create({ userId: user.userId, token, expiresAt: new Date(Date.now() + 3600000) });
 
-    // Criar o link completo para a página de redefinição de senha
-    const appUri = `${process.env.EXPO_PUBLIC_DEEP_LINK_BASE_URL}/${token}`;
-
-    const resetLink = `${process.env.API_BASE_URL}/v1/redirect/app?uri=${encodeURIComponent(appUri)}`;
+    // Link direto para a página de redefinição de senha do painel web.
+    const resetLink = `${process.env.FRONTEND_URL}/reset-password/${token}`;
 
       try {
         const { data, error } = await resend.emails.send({
-            from: 'Cacambas <onboarding@icellfipe.com.br>', // MUDE ISSO! Use o seu domínio verificado no Resend.
-                                                                      // Ex: 'Cacambas <onboarding@minhaapp.com>'
-                                                                      // 'onboarding@resend.dev' é um domínio de teste do Resend e
-                                                                      // só funciona para e-mails de teste para o seu próprio e-mail ou alguns outros.
+            from: 'CaçambaFácil <onboarding@resend.dev>', // Remetente de teste do Resend.
+                                                                      // Só entrega para o email cadastrado na conta Resend.
+                                                                      // Quando verificar um domínio próprio, troque para
+                                                                      // 'CaçambaFácil <onboarding@seudominio.com.br>'.
             to: [userEmail], // O 'to' deve ser um array
-            subject: 'Redefinição de Senha - Cacambas',
+            subject: 'Redefinição de Senha - CaçambaFácil',
             html: `
                 <p>Olá,</p>
-                <p>Você solicitou a redefinição de senha para a sua conta Cacambas.</p>
+                <p>Você solicitou a redefinição de senha da sua conta CaçambaFácil.</p>
                 <p>Para redefinir sua senha, clique no botão abaixo:</p>
 
                 <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin: auto;">
@@ -302,11 +295,14 @@ export async function requestPasswordReset(req, res) {
                                 border-radius: 8px;
                                 white-space: nowrap;
                             ">
-                                Redefinir minha senha no aplicativo
+                                Redefinir minha senha
                             </a>
                         </td>
                     </tr>
                 </table>
+
+                <p>Se você não solicitou isso, pode ignorar este email.</p>
+                <p>Este link expira em 1 hora.</p>
             `,
         });
 
