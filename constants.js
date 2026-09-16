@@ -2,8 +2,8 @@ import dotenv from "dotenv"
 dotenv.config()
 
 // API
-const API_HOST = process.env.API_HOST
-const API_PORT = process.env.API_PORT
+const API_HOST = process.env.API_HOST || "0.0.0.0"
+const API_PORT = process.env.PORT || process.env.API_PORT
 
 // MONGO
 const MONGO_DB = process.env.MONGO_DB
