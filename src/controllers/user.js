@@ -19,7 +19,7 @@ export async function getAllUsers(req, res) {
 
   console.log("FILTER Users", filter);
 
-  const users = await UserModel.find(filter);
+  const users = await UserModel.find(filter).select('-userPass');
 
   if (!users) {
     return res.error("Erro ao consultar os usuários");

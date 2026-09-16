@@ -62,7 +62,7 @@ global.logging = {
 app.use('/v1/auth', v1.auth);
 app.use("/v1/user", v1.user);
 app.use("/v1/bucket", v1.bucket);
-app.use("/v1/device", v1.device);
+app.use("/v1/cliente", v1.cliente);
 app.use("/v1/upload", v1.upload)
 app.use("/v1/addresses", v1.addresses);
 app.use("/v1/payment", v1.payment);
