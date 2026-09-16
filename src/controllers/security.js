@@ -2,7 +2,11 @@ import UserModel from "../models/users.js";
 import bcrypt from 'bcrypt';
 import { Resend } from 'resend';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+if (!process.env.RESEND_API_KEY) {
+  console.warn("RESEND_API_KEY não foi configurado no arquivo .env");
+}
+
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 function generateTwoFactorCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -64,6 +68,10 @@ export async function send2FACode(req, res) {
 
     if (!user.twoFactorEnabled) {
       return res.status(400).json({ error: '2FA não está ativado para este usuário.' });
+    }
+
+    if (!resend) {
+      return res.status(500).json({ error: 'Serviço de e-mail não configurado.' });
     }
 
     const code = generateTwoFactorCode();
