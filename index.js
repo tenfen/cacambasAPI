@@ -2,10 +2,11 @@ import dns from "dns";
 
 // Alguns provedores de internet/roteadores locais não resolvem corretamente
 // os registros SRV usados pelo mongodb+srv://. Em produção (Render) o DNS
-// já funciona nativamente e forçar um resolver externo pode até quebrar
-// (ex: DNS UDP bloqueado na rede do container), então só aplicamos isso
-// fora de produção.
-if (process.env.NODE_ENV !== "production") {
+// já funciona nativamente e forçar um resolver externo até quebra (DNS UDP
+// bloqueado na rede do container), então só aplicamos isso fora do Render.
+// Checa a variável RENDER (injetada automaticamente pela plataforma em todo
+// serviço) em vez de depender de NODE_ENV estar configurado corretamente.
+if (!process.env.RENDER) {
   dns.setServers(["8.8.8.8", "1.1.1.1"]);
 }
 
