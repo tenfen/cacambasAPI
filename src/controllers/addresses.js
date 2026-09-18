@@ -7,8 +7,9 @@ import UserModel from "../models/users.js";
 export async function createAddressesUser(req, res) {
     const getLastAddresses = await AddressesModel.findOne({}).sort({addressId: -1}).limit(1)
     const addressId = getLastAddresses.addressId + 1;
-  
-    // Endpoint POST /api/user
+
+      
+    // Endpoint POST /api/user 
     try{
         console.log(' Criando endereço para userId:', req.params.userId);
         console.log(' Dados recebidos:', req.body);
