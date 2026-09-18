@@ -135,21 +135,25 @@ export async function createUser(req, res) {
           ...req.body,
           userPass: hashedPassword, // substitui a senha original
           // Definidos depois do spread: cadastro sempre começa em teste
-          // grátis, independente do que vier no corpo da requisição.
+          // grátis e como usuário comum, independente do que vier no
+          // corpo da requisição (não deixa o cliente se autopromover a
+          // admin nem inventar um accountStatus).
+          userRole: "user",
           accountStatus: "trial",
           userActive: true,
           trialEndsAt,
         })
-        user.save();
+        await user.save();
         const { userPass: _, ...userData } = user.toObject();
         return res.send({user: userData, token: generateAuthToken(userData)})
-  
+
       }
     }
-    catch{
+    catch(err){
+      console.error("Erro ao salvar o usuário:", err);
       return res.status(400).send({error:"Erro ao salvar o Usuário"});
     }
-      
+
   }
 
 //update do profile
