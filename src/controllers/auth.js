@@ -79,9 +79,9 @@ export async function autenthicate(req, res) {
           token: generateAuthToken(userResponse),
       });
     }catch (err) {
-        res.status(500).json(err);
-        return res
-    }   
-} 
+        console.error("Erro ao autenticar usuário:", err);
+        return res.status(500).send({ error: "Erro interno do servidor." });
+    }
+}
   
   
