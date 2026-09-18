@@ -45,9 +45,20 @@ function parseSignatureHeader(signatureHeader) {
 function validateMercadoPagoWebhook(req) {
   const secret = process.env.MERCADOPAGO_WEBHOOK_SECRET;
 
-  // Durante o desenvolvimento, caso a chave ainda não tenha
-  // sido configurada, não bloqueia o webhook.
   if (!secret) {
+    /*
+     * Em produção, sem a chave não há como validar a origem do webhook —
+     * bloqueia por padrão para não permitir que qualquer um forje uma
+     * notificação de pagamento aprovado. Só é tolerado em desenvolvimento.
+     */
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "MERCADOPAGO_WEBHOOK_SECRET não configurado em produção. Webhook recusado."
+      );
+
+      return false;
+    }
+
     console.warn(
       "MERCADOPAGO_WEBHOOK_SECRET não configurado. Validação ignorada em desenvolvimento."
     );
@@ -165,6 +176,41 @@ export async function createCheckout(req, res) {
     return res.status(500).json({
       success: false,
       message: "Não foi possível criar o checkout.",
+    });
+  }
+}
+
+/**
+ * Receita mensal (uso administrativo) — soma dos pagamentos
+ * aprovados, agrupados por mês de pagamento.
+ */
+export async function getRevenueSummary(req, res) {
+  try {
+    const results = await PaymentModel.aggregate([
+      { $match: { status: "approved", paidAt: { $ne: null } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m", date: "$paidAt" } },
+          total: { $sum: "$amount" },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: -1 } },
+    ]);
+
+    const revenue = results.map((item) => ({
+      month: item._id,
+      total: item.total,
+      count: item.count,
+    }));
+
+    return res.success("Receita consultada com sucesso!", revenue);
+  } catch (error) {
+    console.error("Erro ao consultar receita:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Erro ao consultar receita.",
     });
   }
 }

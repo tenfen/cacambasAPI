@@ -171,12 +171,22 @@ const UserSchema = new Schema(
     accountStatus: {
       type: String,
       enum: [
+        "trial",
         "pending_payment",
         "active",
         "suspended",
         "cancelled",
       ],
       default: "pending_payment",
+    },
+
+    /**
+     * Data em que o teste grátis termina. Só é usada enquanto
+     * accountStatus === "trial".
+     */
+    trialEndsAt: {
+      type: Date,
+      default: null,
     },
 
     /**

@@ -12,6 +12,7 @@ export const BILLING_CONFIG = {
     currency: "BRL",
     frequency: 1,
     frequencyType: "months",
+    trialDays: Number(process.env.BILLING_TRIAL_DAYS || 5),
   },
 
   paymentMethods: {

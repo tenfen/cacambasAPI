@@ -30,9 +30,9 @@ const BucketSchema = new Schema(
     },
 
     /**
-     * Valor da diária/locação.
+     * Valor fechado da locação dessa caçamba (não é por dia).
      */
-    bucketDailyRate: { type: Number, required: false, default: null },
+    bucketRentalValue: { type: Number, required: false, default: null },
 
     bucketNotes: { type: String, required: false, default: null },
 

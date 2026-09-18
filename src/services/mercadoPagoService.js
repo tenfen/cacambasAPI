@@ -56,7 +56,7 @@ export async function createPaymentPreference({
 
     auto_return: "approved",
 
-    statement_descriptor: "ICACAMBA",
+    statement_descriptor: "CACAMBIX",
 
     metadata: {
       userId: user.userId,

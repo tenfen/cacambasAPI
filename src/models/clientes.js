@@ -39,6 +39,31 @@ const ClienteSchema = new Schema(
     clienteActive: { type: Boolean, required: true, default: true },
     clienteNotes: { type: String, required: false, default: null },
 
+    /**
+     * Caçamba alocada a este cliente (bucketId). A lista de caçambas
+     * é fixa (frota do dono do negócio), então o vínculo fica aqui,
+     * do lado que sempre cresce (clientes).
+     */
+    bucketId: { type: Number, required: false, default: null },
+
+    /**
+     * Data em que a caçamba foi entregue/instalada no cliente.
+     */
+    clienteDataEntrada: { type: Date, required: false, default: null },
+
+    /**
+     * Data prevista para retirada/recolhimento da caçamba (some pra data
+     * real assim que o recolhimento é confirmado).
+     */
+    clienteDataSaida: { type: Date, required: false, default: null },
+
+    /**
+     * Valor faturado nesse aluguel, calculado e congelado no momento do
+     * recolhimento (dias alugados × diária da caçamba na época) — depois
+     * disso o bucketId é zerado e não dá mais pra recalcular.
+     */
+    clienteValorFaturado: { type: Number, required: false, default: null },
+
     createdAt: { type: Date, default: Date.now },
     updateAt: { type: Date, default: null },
     deletedAt: { type: Date, default: null },

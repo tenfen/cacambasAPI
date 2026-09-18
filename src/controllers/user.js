@@ -4,6 +4,8 @@ import UserModel from "../models/users.js";
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken'; // Para gerar e verificar tokens seguros
 import app from 'default-api-response-node';
+import { generateAuthToken } from "../helpers/token.js";
+import { BILLING_CONFIG } from "../config/billing.js";
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
@@ -47,6 +49,64 @@ export async function getUserById(req, res) {
   }
 }
 
+/**
+ * Ativa/inativa uma conta (uso administrativo). Não altera dados
+ * de cadastro do usuário — só o acesso ao sistema.
+ */
+export async function updateUserStatus(req, res) {
+  const { userId } = req.params;
+  const { accountStatus } = req.body;
+
+  if (!["active", "suspended"].includes(accountStatus)) {
+    return res.status(400).send({
+      error: "Status inválido. Use 'active' ou 'suspended'.",
+    });
+  }
+
+  try {
+    const user = await UserModel.findOneAndUpdate(
+      { userId: parseInt(userId) },
+      {
+        accountStatus,
+        userActive: accountStatus === "active",
+        updateAt: new Date(),
+      },
+      { new: true }
+    ).select('-userPass');
+
+    if (!user) {
+      return res.status(404).send({ error: "Usuário não encontrado." });
+    }
+
+    return res.success("Status atualizado com sucesso!", user);
+  } catch (err) {
+    console.error("Erro ao atualizar status do usuário:", err);
+    return res.status(500).send({ error: "Erro ao atualizar status do usuário." });
+  }
+}
+
+/**
+ * Exclui permanentemente uma conta (uso administrativo).
+ */
+export async function deleteUser(req, res) {
+  const { userId } = req.params;
+
+  try {
+    const deletedUser = await UserModel.findOneAndDelete({
+      userId: parseInt(userId),
+    }).select('-userPass');
+
+    if (!deletedUser) {
+      return res.status(404).send({ error: "Usuário não encontrado." });
+    }
+
+    return res.success("Usuário excluído com sucesso!", deletedUser);
+  } catch (err) {
+    console.error("Erro ao excluir usuário:", err);
+    return res.status(500).send({ error: "Erro ao excluir usuário." });
+  }
+}
+
 //Criar usuário Novo
 export async function createUser(req, res) {
     const { userEmail, userPass } = req.body;
@@ -66,14 +126,23 @@ export async function createUser(req, res) {
         const saltRounds = 10;
         const hashedPassword = await bcrypt.hash(userPass, saltRounds);
 
+        const trialEndsAt = new Date(
+          Date.now() + BILLING_CONFIG.plan.trialDays * 24 * 60 * 60 * 1000
+        );
+
         const user = new UserModel({
           userId,
           ...req.body,
-          userPass: hashedPassword // substitui a senha original
+          userPass: hashedPassword, // substitui a senha original
+          // Definidos depois do spread: cadastro sempre começa em teste
+          // grátis, independente do que vier no corpo da requisição.
+          accountStatus: "trial",
+          userActive: true,
+          trialEndsAt,
         })
         user.save();
         const { userPass: _, ...userData } = user.toObject();
-        return res.send({user: userData})
+        return res.send({user: userData, token: generateAuthToken(userData)})
   
       }
     }
@@ -268,15 +337,15 @@ export async function requestPasswordReset(req, res) {
 
       try {
         const { data, error } = await resend.emails.send({
-            from: 'CaçambaFácil <onboarding@resend.dev>', // Remetente de teste do Resend.
+            from: 'Cacambix <onboarding@resend.dev>', // Remetente de teste do Resend.
                                                                       // Só entrega para o email cadastrado na conta Resend.
                                                                       // Quando verificar um domínio próprio, troque para
-                                                                      // 'CaçambaFácil <onboarding@seudominio.com.br>'.
+                                                                      // 'Cacambix <onboarding@seudominio.com.br>'.
             to: [userEmail], // O 'to' deve ser um array
-            subject: 'Redefinição de Senha - CaçambaFácil',
+            subject: 'Redefinição de Senha - Cacambix',
             html: `
                 <p>Olá,</p>
-                <p>Você solicitou a redefinição de senha da sua conta CaçambaFácil.</p>
+                <p>Você solicitou a redefinição de senha da sua conta Cacambix.</p>
                 <p>Para redefinir sua senha, clique no botão abaixo:</p>
 
                 <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin: auto;">
