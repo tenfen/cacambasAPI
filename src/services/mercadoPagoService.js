@@ -23,9 +23,11 @@ function isPubliclyReachable(url) {
 export async function createPaymentPreference({
   user,
   paymentId,
+  platform,
 }) {
   const backendUrl = process.env.BACKEND_URL;
   const appScheme = process.env.APP_SCHEME || "cacambas";
+  const frontendUrl = process.env.FRONTEND_URL;
 
   const preferenceData = {
     items: [
@@ -47,12 +49,20 @@ export async function createPaymentPreference({
 
     external_reference: String(paymentId),
 
-    // Volta pro próprio app via deep link, em vez de depender de um site.
-    back_urls: {
-      success: `${appScheme}://payment/success`,
-      failure: `${appScheme}://payment/failure`,
-      pending: `${appScheme}://payment/pending`,
-    },
+    // Painel web volta pra uma URL https normal; o app mobile volta via
+    // deep link, já que um navegador não sabe abrir o esquema cacambas://.
+    back_urls:
+      platform === "web" && isPubliclyReachable(frontendUrl)
+        ? {
+            success: `${frontendUrl}/perfil?payment=success`,
+            failure: `${frontendUrl}/perfil?payment=failure`,
+            pending: `${frontendUrl}/perfil?payment=pending`,
+          }
+        : {
+            success: `${appScheme}://payment/success`,
+            failure: `${appScheme}://payment/failure`,
+            pending: `${appScheme}://payment/pending`,
+          },
 
     auto_return: "approved",
 

@@ -99,7 +99,7 @@ function validateMercadoPagoWebhook(req) {
 
 export async function createCheckout(req, res) {
   try {
-    const { userId } = req.body;
+    const { userId, platform } = req.body;
 
     if (!userId) {
       return res.status(400).json({
@@ -148,6 +148,7 @@ export async function createCheckout(req, res) {
     const preference = await createPaymentPreference({
       user,
       paymentId: payment._id,
+      platform,
     });
 
     payment.providerPreferenceId = preference.id;
@@ -350,7 +351,7 @@ export async function mercadoPagoWebhook(req, res) {
             billingProvider: "mercadopago",
             currentPeriodStart: periodStart,
             currentPeriodEnd: periodEnd,
-            lastPaymentId: String(mercadoPagoPayment.id),
+            lastPaymentId: payment._id,
             lastPaymentStatus: "approved",
           },
         }
@@ -369,7 +370,7 @@ export async function mercadoPagoWebhook(req, res) {
             userActive: false,
             accountStatus: "suspended",
             subscriptionStatus: "overdue",
-            lastPaymentId: String(mercadoPagoPayment.id),
+            lastPaymentId: payment._id,
             lastPaymentStatus: mercadoPagoPayment.status,
           },
         }
