@@ -118,13 +118,19 @@ export async function createCheckout(req, res) {
     }
 
     /*
-     * Usuário já ativo pode criar um novo checkout para renovar
-     * antecipadamente (ex: assinatura vence amanhã e ele já quer pagar).
-     * Por isso não bloqueamos aqui — só não rebaixamos o status dele
-     * mais abaixo enquanto o pagamento está só "pendente", pra não
-     * cortar o acesso de quem ainda está dentro do período pago.
+     * Usuário já ativo (ou ainda dentro do teste grátis) pode criar um
+     * novo checkout para pagar antecipadamente (ex: assinatura vence
+     * amanhã, ou quer contratar antes do trial acabar). Por isso não
+     * bloqueamos aqui — só não rebaixamos o status dele mais abaixo
+     * enquanto o pagamento está só "pendente", pra não cortar o acesso
+     * de quem ainda está dentro do período pago ou do trial.
      */
-    const jaEstavaAtivo = user.accountStatus === "active";
+    const aindaEmTrial =
+      user.accountStatus === "trial" &&
+      user.trialEndsAt &&
+      new Date(user.trialEndsAt) > new Date();
+
+    const jaEstavaAtivo = user.accountStatus === "active" || aindaEmTrial;
 
     const paymentId = new mongoose.Types.ObjectId();
 
