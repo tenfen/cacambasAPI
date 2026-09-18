@@ -1,8 +1,15 @@
-// Routes
 import dns from "dns";
 
-dns.setServers(["8.8.8.8", "1.1.1.1"]);
+// Alguns provedores de internet/roteadores locais não resolvem corretamente
+// os registros SRV usados pelo mongodb+srv://. Em produção (Render) o DNS
+// já funciona nativamente e forçar um resolver externo pode até quebrar
+// (ex: DNS UDP bloqueado na rede do container), então só aplicamos isso
+// fora de produção.
+if (process.env.NODE_ENV !== "production") {
+  dns.setServers(["8.8.8.8", "1.1.1.1"]);
+}
 
+// Routes
 import * as v1 from "./src/routes/v1/index.js";
 
 // Constants
