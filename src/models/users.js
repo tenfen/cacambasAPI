@@ -92,65 +92,6 @@ const UserSchema = new Schema(
     },
 
     /**
-     * Campos antigos de assinatura.
-     * Mantidos para não quebrar funcionalidades
-     * que eventualmente já utilizem esses dados.
-     */
-    isPremium: {
-      type: Boolean,
-      required: false,
-      default: false,
-    },
-
-    subscriptionId: {
-      type: String,
-      required: false,
-      default: null,
-    },
-
-    subscriptionPlatform: {
-      type: String,
-      required: false,
-      default: null,
-    },
-
-    subscriptionProductId: {
-      type: String,
-      required: false,
-      default: null,
-    },
-
-    subscriptionPurchaseToken: {
-      type: String,
-      required: false,
-      default: null,
-    },
-
-    subscriptionStartDate: {
-      type: Date,
-      required: false,
-      default: null,
-    },
-
-    subscriptionEndDate: {
-      type: Date,
-      required: false,
-      default: null,
-    },
-
-    subscriptionAutoRenew: {
-      type: Boolean,
-      required: false,
-      default: true,
-    },
-
-    subscriptionCancelledAt: {
-      type: Date,
-      required: false,
-      default: null,
-    },
-
-    /**
      * ==========================================
      * CONTROLE DA CONTA E DO PAGAMENTO
      * ==========================================
