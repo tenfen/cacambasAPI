@@ -8,6 +8,8 @@ import { createCliente } from "../../controllers/cliente.js";
 import { updateCliente } from "../../controllers/cliente.js";
 import { deleteCliente } from "../../controllers/cliente.js";
 import { getLocacoesDoCliente } from "../../controllers/cliente.js";
+import { recolherLocacao } from "../../controllers/cliente.js";
+import { cancelarLocacaoDoCliente } from "../../controllers/cliente.js";
 import { marcarRecolhida } from "../../controllers/cliente.js";
 import { getRevenueSummary } from "../../controllers/cliente.js";
 import { authenticate, requireActiveAccount, requireSelfOrAdmin } from "../../middlewares/auth.js";
@@ -33,6 +35,9 @@ router.put(
   "/:clienteId/recolher",
   marcarRecolhida
 );
+
+router.put("/:clienteId/locacoes/:locacaoId/recolher", recolherLocacao);
+router.put("/:clienteId/locacoes/:locacaoId/cancelar", cancelarLocacaoDoCliente);
 
 router.delete("/:clienteId", deleteCliente);
 

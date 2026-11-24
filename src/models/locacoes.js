@@ -42,14 +42,11 @@ const LocacaoSchema = new Schema(
   }
 );
 
-// Uma caçamba só pode estar com um cliente por vez, e vice-versa.
+// Uma caçamba só pode estar com um cliente por vez. O cliente pode ter
+// várias caçambas ao mesmo tempo.
 LocacaoSchema.index(
   { bucketId: 1 },
   { unique: true, partialFilterExpression: { status: "aberta" }, name: "bucket_aberta" }
-);
-LocacaoSchema.index(
-  { clienteId: 1 },
-  { unique: true, partialFilterExpression: { status: "aberta" }, name: "cliente_aberta" }
 );
 LocacaoSchema.index(
   { legacyClienteId: 1 },

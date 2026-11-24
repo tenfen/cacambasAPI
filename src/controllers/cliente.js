@@ -1,11 +1,13 @@
 import ClienteModel from "../models/clientes.js";
-import BucketModel from "../models/buckets.js";
 import LocacaoModel from "../models/locacoes.js";
 import {
-  CacambaOcupadaError,
-  abrirOuAtualizarLocacao,
-  cancelarLocacaoAberta,
+  LocacaoError,
+  cancelarLocacao,
   concluirLocacao,
+  concluirVinculoAntigo,
+  lerLocacoes,
+  listarAbertas,
+  salvarLocacoes,
 } from "../services/locacaoService.js";
 import { geocodeEndereco } from "../helpers/geocoding.js";
 import { isAdmin, ownerFilter, ownerIdForCreate, parseId, pick } from "../helpers/ownership.js";
@@ -25,19 +27,29 @@ const CLIENTE_FIELDS = [
   "clienteAddressReference",
   "clienteActive",
   "clienteNotes",
-  "clienteDataEntrada",
-  "clienteDataSaida",
-  "bucketId",
 ];
 
-/** A caçamba alocada precisa ser do mesmo dono do cliente. */
-async function bucketPertenceAoDono(bucketId, userId) {
-  if (bucketId === undefined || bucketId === null) return true;
+/** Inclui em cada cliente as caçambas que estão com ele agora. */
+async function comLocacoesAbertas(clientes) {
+  const abertas = await LocacaoModel.find({
+    clienteId: { $in: clientes.map((c) => c.clienteId) },
+    status: "aberta",
+  });
 
-  const id = parseId(bucketId);
-  if (id === null) return false;
+  return clientes.map((c) => {
+    const locacoesAbertas = abertas.filter(
+      (l) => l.clienteId === c.clienteId && l.userId === c.userId
+    );
+    const cliente = c.toObject();
+    const temVinculoAntigo =
+      Boolean(cliente.bucketId) && !locacoesAbertas.some((l) => l.bucketId === cliente.bucketId);
 
-  return Boolean(await BucketModel.findOne({ bucketId: id, userId }));
+    return { ...cliente, locacoesAbertas, temVinculoAntigo };
+  });
+}
+
+function buscarCliente(req) {
+  return ClienteModel.findOne({ clienteId: parseId(req.params.clienteId), ...ownerFilter(req) });
 }
 
 export async function getAllClientes(req, res) {
@@ -55,7 +67,7 @@ export async function getAllClientes(req, res) {
     return res.error("Erro ao consultar os clientes");
   }
 
-  return res.success("Clientes consultados com sucesso!", clientes);
+  return res.success("Clientes consultados com sucesso!", await comLocacoesAbertas(clientes));
 }
 
 export async function getClienteById(req, res) {
@@ -69,7 +81,7 @@ export async function getClienteById(req, res) {
       });
     }
 
-    return res.success("Cliente consultado com sucesso!", cliente);
+    return res.success("Cliente consultado com sucesso!", (await comLocacoesAbertas([cliente]))[0]);
   } catch (err) {
     console.log(err);
     return res.status(400).send({ error: "Erro ao consultar o cliente" });
@@ -88,8 +100,19 @@ export async function createCliente(req, res) {
     Math.max(getLastItem?.clienteId ?? 0, lastLocacao?.clienteId ?? 0) + 1;
 
   try {
-    if (!(await bucketPertenceAoDono(content.bucketId, userId))) {
-      return res.status(400).send({ status: 400, message: "Caçamba não encontrada." });
+    const locacoes = lerLocacoes(req.body.locacoes).filter((l) => !l._id);
+
+    // Compatibilidade com o formulário anterior (uma caçamba só).
+    if (!locacoes.length && req.body.bucketId) {
+      locacoes.push(
+        ...lerLocacoes([
+          {
+            bucketId: req.body.bucketId,
+            dataEntrada: req.body.clienteDataEntrada,
+            dataPrevista: req.body.clienteDataSaida,
+          },
+        ])
+      );
     }
 
     /*
@@ -111,37 +134,27 @@ export async function createCliente(req, res) {
       userId,
       clienteLatitude: coordenadas?.latitude ?? null,
       clienteLongitude: coordenadas?.longitude ?? null,
-      // Vinculada só depois que a locação for aberta.
-      bucketId: null,
+      // Cliente com caçamba é sempre ativo.
+      ...(locacoes.length ? { clienteActive: true } : {}),
     });
 
-    let savedCliente = await cliente.save();
+    const savedCliente = await cliente.save();
 
-    if (content.bucketId !== undefined && content.bucketId !== null) {
-      const bucketId = parseId(content.bucketId);
-
-      try {
-        await abrirOuAtualizarLocacao(savedCliente, bucketId);
-      } catch (err) {
-        // Não deixa um cadastro pela metade se a caçamba já foi ocupada.
-        await ClienteModel.deleteOne({ clienteId, userId });
-        throw err;
-      }
-
-      savedCliente = await ClienteModel.findOneAndUpdate(
-        { clienteId, userId },
-        { bucketId, clienteActive: true },
-        { new: true }
-      );
+    try {
+      await salvarLocacoes(savedCliente, locacoes);
+    } catch (err) {
+      // Não deixa um cadastro pela metade se a caçamba já foi ocupada.
+      await ClienteModel.deleteOne({ clienteId, userId });
+      throw err;
     }
 
     return res.status(200).send({
       status: 200,
       message: "Cliente salvo com sucesso",
-      cliente: savedCliente,
+      cliente: (await comLocacoesAbertas([savedCliente]))[0],
     });
   } catch (err) {
-    if (err instanceof CacambaOcupadaError) {
+    if (err instanceof LocacaoError) {
       return res.status(400).send({ status: 400, message: err.message });
     }
 
@@ -166,13 +179,7 @@ export async function updateCliente(req, res) {
 
     const update = { ...pick(req.body, CLIENTE_FIELDS), updateAt: new Date() };
 
-    // Só valida quando a caçamba muda: a atual pode já ter sido excluída.
-    if (
-      update.bucketId !== atual.bucketId &&
-      !(await bucketPertenceAoDono(update.bucketId, atual.userId))
-    ) {
-      return res.status(400).send({ status: 400, message: "Caçamba não encontrada." });
-    }
+    const locacoes = lerLocacoes(req.body.locacoes);
 
     /*
      * Se algum dado de endereço foi informado na atualização,
@@ -193,17 +200,10 @@ export async function updateCliente(req, res) {
       update.clienteLongitude = coordenadas?.longitude ?? null;
     }
 
-    const bucketId =
-      update.bucketId === undefined ? atual.bucketId : parseId(update.bucketId);
+    const novas = await salvarLocacoes({ ...atual.toObject(), ...update }, locacoes);
 
-    if (bucketId !== null && bucketId !== undefined) {
-      await abrirOuAtualizarLocacao({ ...atual.toObject(), ...update }, bucketId);
-
-      // Novo aluguel: o cliente volta a ficar ativo.
-      if (!atual.bucketId) update.clienteActive = true;
-    } else if (atual.bucketId) {
-      await cancelarLocacaoAberta(atual);
-    }
+    // Novo aluguel: o cliente volta a ficar ativo.
+    if (novas) update.clienteActive = true;
 
     const cliente = await ClienteModel.findOneAndUpdate(
       { clienteId: parseId(req.params.clienteId), ...ownerFilter(req) },
@@ -221,10 +221,10 @@ export async function updateCliente(req, res) {
     return res.status(200).send({
       status: 200,
       message: "Cliente salvo com sucesso",
-      cliente: cliente,
+      cliente: (await comLocacoesAbertas([cliente]))[0],
     });
   } catch (err) {
-    if (err instanceof CacambaOcupadaError) {
+    if (err instanceof LocacaoError) {
       return res.status(400).send({ status: 400, message: err.message });
     }
 
@@ -233,55 +233,65 @@ export async function updateCliente(req, res) {
   }
 }
 
-/**
- * Confirma o recolhimento da caçamba de um cliente: encerra a locação,
- * congelando o valor (fechado, não é por dia), e libera o cadastro para um
- * novo aluguel.
- */
-export async function marcarRecolhida(req, res) {
-  try {
-    const cliente = await ClienteModel.findOne({ clienteId: parseId(req.params.clienteId), ...ownerFilter(req) });
+/** Executa uma ação sobre o cliente da rota e devolve a locação afetada. */
+function acaoDeLocacao(acao, mensagem) {
+  return async (req, res) => {
+    try {
+      const cliente = await buscarCliente(req);
 
-    if (!cliente) {
-      return res.status(404).send({
-        status: 404,
-        message: "Cliente não encontrado.",
+      if (!cliente) {
+        return res.status(404).send({ status: 404, message: "Cliente não encontrado." });
+      }
+
+      const locacao = await acao(cliente, req);
+
+      return res.status(200).send({
+        status: 200,
+        message: mensagem,
+        locacao,
+        cliente: (await comLocacoesAbertas([await buscarCliente(req)]))[0],
       });
+    } catch (err) {
+      if (err instanceof LocacaoError) {
+        return res.status(400).send({ status: 400, message: err.message });
+      }
+
+      console.log(err);
+      return res.status(400).send({ status: 400, message: "Erro ao atualizar o aluguel." });
     }
-
-    if (!cliente.bucketId) {
-      return res.status(400).send({
-        status: 400,
-        message: "Este cliente não tem caçamba alocada no momento.",
-      });
-    }
-
-    const agora = new Date();
-    const locacao = await concluirLocacao(cliente, agora);
-
-    const clienteAtualizado = await ClienteModel.findOneAndUpdate(
-      { clienteId: cliente.clienteId, userId: cliente.userId },
-      {
-        bucketId: null,
-        clienteActive: false,
-        clienteDataEntrada: null,
-        clienteDataSaida: null,
-        updateAt: agora,
-      },
-      { new: true }
-    );
-
-    return res.status(200).send({
-      status: 200,
-      message: "Caçamba recolhida com sucesso",
-      cliente: clienteAtualizado,
-      locacao,
-    });
-  } catch (err) {
-    console.log(err);
-    return res.status(400).send({ error: "Erro ao confirmar recolhimento" });
-  }
+  };
 }
+
+/**
+ * Confirma o recolhimento de uma caçamba: encerra a locação, congelando o
+ * valor (fechado, não é por dia). As outras caçambas do cliente continuam.
+ */
+export const recolherLocacao = acaoDeLocacao(
+  (cliente, req) => concluirLocacao(cliente, req.params.locacaoId),
+  "Caçamba recolhida com sucesso"
+);
+
+export const cancelarLocacaoDoCliente = acaoDeLocacao(
+  (cliente, req) => cancelarLocacao(cliente, req.params.locacaoId),
+  "Aluguel cancelado"
+);
+
+/**
+ * Recolhimento sem informar a locação: vale quando o cliente tem uma só, e
+ * para vínculos antigos que não puderam ser convertidos.
+ */
+export const marcarRecolhida = acaoDeLocacao(async (cliente) => {
+  const abertas = await listarAbertas(cliente);
+
+  if (abertas.length > 1) {
+    throw new LocacaoError("Este cliente tem mais de uma caçamba. Escolha qual foi recolhida.");
+  }
+
+  if (abertas.length === 1) return concluirLocacao(cliente, String(abertas[0]._id));
+  if (cliente.bucketId) return concluirVinculoAntigo(cliente);
+
+  throw new LocacaoError("Este cliente não tem caçamba alocada no momento.");
+}, "Caçamba recolhida com sucesso");
 
 /**
  * Receita mensal do próprio negócio do usuário — soma dos valores
@@ -339,9 +349,9 @@ export async function getLocacoesDoCliente(req, res) {
 
 export async function deleteCliente(req, res) {
   try {
-    const cliente = await ClienteModel.findOne({ clienteId: parseId(req.params.clienteId), ...ownerFilter(req) });
+    const cliente = await buscarCliente(req);
 
-    if (cliente?.bucketId) {
+    if (cliente && (cliente.bucketId || (await listarAbertas(cliente)).length)) {
       return res.status(400).send({
         status: 400,
         message: "Este cliente está com uma caçamba. Marque como recolhida antes de excluir.",

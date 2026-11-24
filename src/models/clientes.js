@@ -40,21 +40,15 @@ const ClienteSchema = new Schema(
     clienteNotes: { type: String, required: false, default: null },
 
     /**
-     * Caçamba alocada a este cliente (bucketId). A lista de caçambas
-     * é fixa (frota do dono do negócio), então o vínculo fica aqui,
-     * do lado que sempre cresce (clientes).
+     * Formato antigo (uma caçamba por cliente). Os aluguéis atuais ficam na
+     * coleção "locacoes"; aqui só é lido na conversão.
      */
     bucketId: { type: Number, required: false, default: null },
 
-    /**
-     * Data em que a caçamba foi entregue/instalada no cliente.
-     */
+    /** Formato antigo, ver bucketId. */
     clienteDataEntrada: { type: Date, required: false, default: null },
 
-    /**
-     * Data prevista para retirada. Limpa no recolhimento: o histórico
-     * fica na coleção "locacoes".
-     */
+    /** Formato antigo, ver bucketId. */
     clienteDataSaida: { type: Date, required: false, default: null },
 
     /**

@@ -1,13 +1,70 @@
+import mongoose from "mongoose";
 import LocacaoModel from "../models/locacoes.js";
 import ClienteModel from "../models/clientes.js";
 import BucketModel from "../models/buckets.js";
+import { parseId } from "../helpers/ownership.js";
 
 const CODIGO_DUPLICADO = 11000;
 
-export class CacambaOcupadaError extends Error {
-  constructor() {
-    super("Esta caçamba já está com outro cliente.");
+/** Índice da versão que permitia só uma caçamba por cliente. */
+const INDICE_ANTIGO = "cliente_aberta";
+
+/** Erro que pode ser mostrado ao usuário. */
+export class LocacaoError extends Error {}
+
+export class CacambaOcupadaError extends LocacaoError {
+  constructor(bucketName) {
+    super(
+      bucketName
+        ? `A caçamba "${bucketName}" já está alugada.`
+        : "Esta caçamba já está alugada."
+    );
   }
+}
+
+function lerData(valor) {
+  if (valor === undefined || valor === null || valor === "") return null;
+
+  const data = typeof valor === "string" ? new Date(valor) : new Date(NaN);
+  if (Number.isNaN(data.getTime())) throw new LocacaoError("Data inválida.");
+
+  return data;
+}
+
+/**
+ * Valida as locações enviadas pelo formulário. Item com "_id" altera datas
+ * de uma locação existente; sem "_id" abre uma nova.
+ */
+export function lerLocacoes(lista) {
+  if (lista === undefined || lista === null) return [];
+  if (!Array.isArray(lista) || lista.length > 100) {
+    throw new LocacaoError("Lista de caçambas inválida.");
+  }
+
+  const vistas = new Set();
+
+  return lista.map((item) => {
+    const datas = {
+      dataEntrada: lerData(item?.dataEntrada),
+      dataPrevista: lerData(item?.dataPrevista),
+    };
+
+    if (item?._id !== undefined && item?._id !== null) {
+      if (typeof item._id !== "string" || !mongoose.isValidObjectId(item._id)) {
+        throw new LocacaoError("Locação inválida.");
+      }
+      return { _id: item._id, ...datas };
+    }
+
+    const bucketId = parseId(item?.bucketId);
+    if (bucketId === null) throw new LocacaoError("Selecione a caçamba.");
+    if (vistas.has(bucketId)) {
+      throw new LocacaoError("A mesma caçamba foi escolhida mais de uma vez.");
+    }
+    vistas.add(bucketId);
+
+    return { bucketId, ...datas };
+  });
 }
 
 function dadosDaCacamba(bucket) {
@@ -21,81 +78,167 @@ function dadosDaCacamba(bucket) {
 }
 
 /**
- * Abre a locação do cliente ou atualiza a que já está aberta (datas, nome
- * ou correção da caçamba). O índice único impede que dois clientes fiquem
- * com a mesma caçamba, mesmo em acessos simultâneos.
+ * Abre uma locação. O índice único impede que dois clientes fiquem com a
+ * mesma caçamba, mesmo em acessos simultâneos.
  */
-export async function abrirOuAtualizarLocacao(cliente, bucketId) {
+export async function abrirLocacao(cliente, { bucketId, dataEntrada, dataPrevista }) {
   const { userId, clienteId } = cliente;
-
-  const ocupada = await LocacaoModel.findOne({ bucketId, status: "aberta" });
-
-  if (ocupada && ocupada.clienteId !== clienteId) {
-    throw new CacambaOcupadaError();
-  }
-
   const bucket = await BucketModel.findOne({ bucketId, userId });
 
+  if (!bucket) throw new LocacaoError("Caçamba não encontrada.");
+
+  if (await LocacaoModel.findOne({ bucketId, status: "aberta" })) {
+    throw new CacambaOcupadaError(bucket.bucketName);
+  }
+
   try {
-    await LocacaoModel.updateOne(
-      { userId, clienteId, status: "aberta" },
-      {
-        $set: {
-          bucketId,
-          ...dadosDaCacamba(bucket),
-          clienteNome: cliente.clienteNome,
-          dataEntrada: cliente.clienteDataEntrada ?? null,
-          dataPrevista: cliente.clienteDataSaida ?? null,
-        },
-      },
-      { upsert: true }
-    );
+    return await LocacaoModel.create({
+      userId,
+      clienteId,
+      clienteNome: cliente.clienteNome,
+      bucketId,
+      ...dadosDaCacamba(bucket),
+      dataEntrada,
+      dataPrevista,
+    });
   } catch (err) {
-    if (err?.code === CODIGO_DUPLICADO) throw new CacambaOcupadaError();
+    if (err?.code === CODIGO_DUPLICADO) throw new CacambaOcupadaError(bucket.bucketName);
     throw err;
   }
 }
 
-/** Caçamba retirada do cadastro sem recolhimento: não gera receita. */
-export async function cancelarLocacaoAberta({ userId, clienteId }) {
-  await LocacaoModel.updateOne(
+/**
+ * Abre as locações novas e depois atualiza as datas das existentes. Se uma
+ * caçamba estiver ocupada, desfaz as que abriu nesta chamada.
+ */
+export async function salvarLocacoes(cliente, itens) {
+  const { userId, clienteId } = cliente;
+  const abertasAgora = [];
+
+  try {
+    for (const item of itens.filter((i) => !i._id)) {
+      abertasAgora.push(await abrirLocacao(cliente, item));
+    }
+  } catch (err) {
+    for (const locacao of abertasAgora) {
+      await LocacaoModel.deleteOne({ _id: locacao._id, status: "aberta" });
+    }
+    throw err;
+  }
+
+  for (const { _id, dataEntrada, dataPrevista } of itens.filter((i) => i._id)) {
+    await LocacaoModel.updateOne(
+      { _id, userId, clienteId, status: "aberta" },
+      { $set: { dataEntrada, dataPrevista } }
+    );
+  }
+
+  await LocacaoModel.updateMany(
     { userId, clienteId, status: "aberta" },
-    { $set: { status: "cancelada" } }
+    { $set: { clienteNome: cliente.clienteNome } }
+  );
+
+  return abertasAgora.length;
+}
+
+export function listarAbertas({ userId, clienteId }) {
+  return LocacaoModel.find({ userId, clienteId, status: "aberta" });
+}
+
+/**
+ * Remove o vínculo do formato antigo antes de fechar a locação, para a
+ * conversão não reabri-la quando a API reiniciar.
+ */
+async function limparVinculoAntigo({ userId, clienteId }, bucketId) {
+  await ClienteModel.updateOne(
+    { userId, clienteId, bucketId },
+    { $set: { bucketId: null, clienteDataEntrada: null, clienteDataSaida: null } }
   );
 }
 
-/** Encerra a locação e congela o valor. Repetir não cobra duas vezes. */
-export async function concluirLocacao(cliente, agora = new Date()) {
-  const { userId, clienteId, bucketId } = cliente;
+/** Sem nenhuma caçamba, o cliente fica inativo. */
+async function atualizarAtivo({ userId, clienteId }) {
+  if (await LocacaoModel.findOne({ userId, clienteId, status: "aberta" })) return;
+
+  await ClienteModel.updateOne(
+    { userId, clienteId },
+    { $set: { clienteActive: false, updateAt: new Date() } }
+  );
+}
+
+async function buscarAberta({ userId, clienteId }, locacaoId) {
+  const locacao = mongoose.isValidObjectId(locacaoId)
+    ? await LocacaoModel.findOne({ _id: locacaoId, userId, clienteId, status: "aberta" })
+    : null;
+
+  if (!locacao) throw new LocacaoError("Este aluguel não está mais em andamento.");
+
+  return locacao;
+}
+
+/** Encerra uma locação e congela o valor. Repetir não cobra duas vezes. */
+export async function concluirLocacao(cliente, locacaoId) {
+  const aberta = await buscarAberta(cliente, locacaoId);
+  const { userId, bucketId } = aberta;
   const bucket = await BucketModel.findOne({ bucketId, userId });
 
-  const fechamento = {
-    status: "concluida",
-    dataRecolhimento: agora,
-    ...(bucket?.bucketRentalValue != null ? { valor: bucket.bucketRentalValue } : {}),
-  };
+  await limparVinculoAntigo(cliente, bucketId);
 
   const concluida = await LocacaoModel.findOneAndUpdate(
-    { userId, clienteId, status: "aberta" },
-    { $set: fechamento },
+    { _id: aberta._id, status: "aberta" },
+    {
+      $set: {
+        status: "concluida",
+        dataRecolhimento: new Date(),
+        ...(bucket?.bucketRentalValue != null ? { valor: bucket.bucketRentalValue } : {}),
+      },
+    },
     { new: true }
   );
 
-  if (concluida) return concluida;
+  if (!concluida) throw new LocacaoError("Este aluguel não está mais em andamento.");
 
-  // Recolhimento anterior interrompido antes de atualizar o cliente.
-  const anterior = await LocacaoModel.findOne({
-    userId,
-    clienteId,
-    bucketId,
-    status: "concluida",
-    legacyClienteId: null,
-  }).sort({ dataRecolhimento: -1 });
+  await atualizarAtivo(cliente);
 
-  if (anterior) return anterior;
+  return concluida;
+}
 
-  // Vínculo antigo que não pôde ser convertido (caçamba duplicada).
-  return LocacaoModel.create({
+/** Aluguel lançado por engano ou desistência: não gera receita. */
+export async function cancelarLocacao(cliente, locacaoId) {
+  const aberta = await buscarAberta(cliente, locacaoId);
+
+  await limparVinculoAntigo(cliente, aberta.bucketId);
+
+  const cancelada = await LocacaoModel.findOneAndUpdate(
+    { _id: aberta._id, status: "aberta" },
+    { $set: { status: "cancelada" } },
+    { new: true }
+  );
+
+  if (!cancelada) throw new LocacaoError("Este aluguel não está mais em andamento.");
+
+  await atualizarAtivo(cliente);
+
+  return cancelada;
+}
+
+/**
+ * Vínculo antigo que não pôde ser convertido porque a mesma caçamba estava
+ * em dois clientes: registra direto como concluído.
+ */
+export async function concluirVinculoAntigo(cliente) {
+  const { userId, clienteId, bucketId } = cliente;
+  const bucket = await BucketModel.findOne({ bucketId, userId });
+
+  // Só quem remover o vínculo registra o aluguel.
+  const anterior = await ClienteModel.findOneAndUpdate(
+    { userId, clienteId, bucketId },
+    { $set: { bucketId: null, clienteDataEntrada: null, clienteDataSaida: null } }
+  );
+
+  if (!anterior) throw new LocacaoError("Este aluguel não está mais em andamento.");
+
+  const locacao = await LocacaoModel.create({
     userId,
     clienteId,
     bucketId,
@@ -103,8 +246,22 @@ export async function concluirLocacao(cliente, agora = new Date()) {
     dataEntrada: cliente.clienteDataEntrada ?? null,
     dataPrevista: cliente.clienteDataSaida ?? null,
     ...dadosDaCacamba(bucket),
-    ...fechamento,
+    status: "concluida",
+    dataRecolhimento: new Date(),
   });
+
+  await atualizarAtivo(cliente);
+
+  return locacao;
+}
+
+/** Remove o índice que limitava cada cliente a uma caçamba. */
+async function removerIndiceAntigo() {
+  const indices = await LocacaoModel.collection.indexes();
+
+  if (indices.some((indice) => indice.name === INDICE_ANTIGO)) {
+    await LocacaoModel.collection.dropIndex(INDICE_ANTIGO);
+  }
 }
 
 /**
@@ -128,6 +285,7 @@ function dataDeFaturamento(cliente) {
 export async function converterClientesAntigos() {
   // Garante os índices únicos antes de gravar.
   await LocacaoModel.init();
+  await removerIndiceAntigo();
 
   const resumo = { faturadas: 0, abertas: 0, conflitos: [] };
 
@@ -160,16 +318,21 @@ export async function converterClientesAntigos() {
     const aberta = await LocacaoModel.findOne({
       userId: cliente.userId,
       clienteId: cliente.clienteId,
+      bucketId: cliente.bucketId,
       status: "aberta",
     });
 
     if (aberta) continue;
 
     try {
-      await abrirOuAtualizarLocacao(cliente, cliente.bucketId);
+      await abrirLocacao(cliente, {
+        bucketId: cliente.bucketId,
+        dataEntrada: cliente.clienteDataEntrada ?? null,
+        dataPrevista: cliente.clienteDataSaida ?? null,
+      });
       resumo.abertas += 1;
     } catch (err) {
-      if (!(err instanceof CacambaOcupadaError)) throw err;
+      if (!(err instanceof LocacaoError)) throw err;
       resumo.conflitos.push({ clienteId: cliente.clienteId, bucketId: cliente.bucketId });
     }
   }
