@@ -1,6 +1,7 @@
 import UserModel from "../models/users.js";
 import bcrypt from 'bcrypt';
 import { Resend } from 'resend';
+import { parseId } from "../helpers/ownership.js";
 
 if (!process.env.RESEND_API_KEY) {
   console.warn("RESEND_API_KEY não foi configurado no arquivo .env");
@@ -17,7 +18,7 @@ export async function toggle2FA(req, res) {
   const { enable } = req.body;
 
   try {
-    const user = await UserModel.findOne({ userId: parseInt(userId) });
+    const user = await UserModel.findOne({ userId: parseId(userId) });
     
     if (!user) {
       return res.status(404).json({ message: "Usuário não encontrado." });
@@ -55,7 +56,7 @@ export async function toggle2FA(req, res) {
 export async function send2FACode(req, res) {
   const { userEmail } = req.body;
 
-  if (!userEmail) {
+  if (!userEmail || typeof userEmail !== "string") {
     return res.status(400).json({ error: 'Email é obrigatório.' });
   }
 
@@ -131,7 +132,7 @@ export async function send2FACode(req, res) {
 export async function verify2FACode(req, res) {
   const { userEmail, code } = req.body;
 
-  if (!userEmail || !code) {
+  if (typeof userEmail !== "string" || typeof code !== "string" || !userEmail || !code) {
     return res.status(400).json({ error: 'Email e código são obrigatórios.' });
   }
 
@@ -197,7 +198,7 @@ export async function changePassword(req, res) {
   }
 
   try {
-    const user = await UserModel.findOne({ userId: parseInt(userId) });
+    const user = await UserModel.findOne({ userId: parseId(userId) });
     
     if (!user) {
       return res.status(404).json({ message: "Usuário não encontrado." });

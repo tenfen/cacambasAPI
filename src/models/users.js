@@ -210,6 +210,15 @@ const UserSchema = new Schema(
     },
 
     /**
+     * Ids do Mercado Pago que já liberaram um mês. Evita contar duas vezes
+     * a mesma notificação.
+     */
+    appliedPaymentIds: {
+      type: [String],
+      default: [],
+    },
+
+    /**
      * Status do último pagamento recebido.
      */
     lastPaymentStatus: {

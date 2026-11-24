@@ -4,11 +4,16 @@ import UserModel from "../models/users.js";
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken'; // Para gerar e verificar tokens seguros
 import app from 'default-api-response-node';
-import { generateAuthToken } from "../helpers/token.js";
+import { generateAuthToken, PASSWORD_RESET_PURPOSE } from "../helpers/token.js";
+import { parseId, pick } from "../helpers/ownership.js";
+import { getGraceEnd } from "../services/accountAccessService.js";
 import { BILLING_CONFIG } from "../config/billing.js";
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
+
+// Nunca devolver hash de senha nem código de verificação.
+const PUBLIC_USER_FIELDS = "-userPass -twoFactorCode -twoFactorCodeExpires";
 
 export async function getAllUsers(req, res) {
   const { userName, userLastname } =
@@ -21,7 +26,7 @@ export async function getAllUsers(req, res) {
 
   console.log("FILTER Users", filter);
 
-  const users = await UserModel.find(filter).select('-userPass');
+  const users = await UserModel.find(filter).select(PUBLIC_USER_FIELDS);
 
   if (!users) {
     return res.error("Erro ao consultar os usuários");
@@ -37,13 +42,16 @@ export async function getUserById(req, res) {
   const userId = req.params.userId;
 
   try {
-    const user = await UserModel.findOne({ userId: parseInt(userId) }).select('-userPass');
+    const user = await UserModel.findOne({ userId: parseId(userId) }).select(PUBLIC_USER_FIELDS);
 
     if (!user) {
       return res.badRequest("Usuário não encontrado");
     }
 
-    return res.success("Usuário consultado com sucesso!", user);
+    return res.success("Usuário consultado com sucesso!", {
+      ...user.toObject(),
+      graceEndsAt: getGraceEnd(user.currentPeriodEnd),
+    });
   } catch (err) {
     return res.status(500).json(err);
   }
@@ -64,15 +72,27 @@ export async function updateUserStatus(req, res) {
   }
 
   try {
+    const changes = {
+      accountStatus,
+      userActive: accountStatus === "active",
+      updateAt: new Date(),
+    };
+
+    if (accountStatus === "active") {
+      const current = await UserModel.findOne({ userId: parseId(userId) });
+
+      // Liberação manual: sem limpar a data vencida, a conta seria
+      // bloqueada de novo no próximo acesso.
+      if (current?.currentPeriodEnd && current.currentPeriodEnd <= new Date()) {
+        changes.currentPeriodEnd = null;
+      }
+    }
+
     const user = await UserModel.findOneAndUpdate(
-      { userId: parseInt(userId) },
-      {
-        accountStatus,
-        userActive: accountStatus === "active",
-        updateAt: new Date(),
-      },
+      { userId: parseId(userId) },
+      changes,
       { new: true }
-    ).select('-userPass');
+    ).select(PUBLIC_USER_FIELDS);
 
     if (!user) {
       return res.status(404).send({ error: "Usuário não encontrado." });
@@ -93,8 +113,8 @@ export async function deleteUser(req, res) {
 
   try {
     const deletedUser = await UserModel.findOneAndDelete({
-      userId: parseInt(userId),
-    }).select('-userPass');
+      userId: parseId(userId),
+    }).select(PUBLIC_USER_FIELDS);
 
     if (!deletedUser) {
       return res.status(404).send({ error: "Usuário não encontrado." });
@@ -110,6 +130,13 @@ export async function deleteUser(req, res) {
 //Criar usuário Novo
 export async function createUser(req, res) {
     const { userEmail, userPass } = req.body;
+
+    if (
+      typeof userEmail !== "string" || !userEmail ||
+      typeof userPass !== "string" || !userPass
+    ) {
+      return res.status(400).send({ error: "Email e senha são obrigatórios." });
+    }
 
     // Endpoint POST /api/user
     try{
@@ -132,7 +159,8 @@ export async function createUser(req, res) {
 
         const user = new UserModel({
           userId,
-          ...req.body,
+          // Só os campos do formulário: impede injetar assinatura, 2FA etc.
+          ...pick(req.body, ["userName", "userLastname", "userPhone", "userEmail"]),
           userPass: hashedPassword, // substitui a senha original
           // Definidos depois do spread: cadastro sempre começa em teste
           // grátis e como usuário comum, independente do que vier no
@@ -158,9 +186,16 @@ export async function createUser(req, res) {
 
 //update do profile
 export async function updateProfile(req, res) {
-  const userId = req.body.userId;
+  const userId = parseId(req.body.userId);
   const { userName, userLastname, userPhone, userImage, userEmail, currentPassword } = req.body;
   
+  if (
+    (userEmail && typeof userEmail !== "string") ||
+    (currentPassword && typeof currentPassword !== "string")
+  ) {
+    return res.status(400).json({ message: "Dados inválidos." });
+  }
+
   try {
     const currentUser = await UserModel.findOne({ userId: userId }).select('+userPass');
     
@@ -219,6 +254,8 @@ export async function updateProfile(req, res) {
 
     const userResponse = updatedProfile.toObject();
     delete userResponse.userPass;
+    delete userResponse.twoFactorCode;
+    delete userResponse.twoFactorCodeExpires;
 
     res.status(200).json(userResponse);
   } catch (error) {
@@ -234,10 +271,10 @@ export async function updatePushToken(req, res) {
 
   try {
     const user = await UserModel.findOneAndUpdate(
-      { userId: parseInt(userId) },
+      { userId: parseId(userId) },
       { pushToken: pushToken },
       { new: true }
-    );
+    ).select(PUBLIC_USER_FIELDS);
 
     if (!user) {
       return res.status(404).json({ message: "Usuário não encontrado." });
@@ -280,10 +317,10 @@ export async function updateNotificationSettings(req, res) {
     console.log('💾 Dados que serão salvos no banco:', updateData);
 
     const user = await UserModel.findOneAndUpdate(
-      { userId: parseInt(userId) },
+      { userId: parseId(userId) },
       updateData,
       { new: true }
-    );
+    ).select(PUBLIC_USER_FIELDS);
 
     if (!user) {
       return res.status(404).json({ message: "Usuário não encontrado." });
@@ -312,7 +349,7 @@ export async function requestPasswordReset(req, res) {
 
   const {userEmail} = req.body;
 
-  if (!userEmail) {
+  if (!userEmail || typeof userEmail !== "string") {
     return res.status(400).send({ error: 'Email é obrigatório.' });
   }
 
@@ -327,7 +364,7 @@ export async function requestPasswordReset(req, res) {
 
     // Gerar um token JWT único e com expiração curta (ex: 1 hora)
     const token = jwt.sign(
-      { userId: user.userId, userEmail: user.userEmail },
+      { purpose: PASSWORD_RESET_PURPOSE, userId: user.userId, userEmail: user.userEmail },
       process.env.JWT_SECRET,
       { expiresIn: '1h' } // Token expira em 1 hora
     );
@@ -424,6 +461,11 @@ export async function resetPassword(req, res) {
     } catch (err) {
       console.error('Erro ao verificar token JWT:', err.message);
       return res.status(401).send({ error: 'Link de redefinição inválido ou expirado. Tente novamente.' });
+    }
+
+    // Um token de login não pode servir para trocar a senha.
+    if (decodedToken.purpose !== PASSWORD_RESET_PURPOSE) {
+      return res.status(401).send({ error: "Link de redefinição inválido ou expirado. Tente novamente." });
     }
 
     const { userId } = decodedToken;

@@ -13,6 +13,8 @@ export const BILLING_CONFIG = {
     frequency: 1,
     frequencyType: "months",
     trialDays: Number(process.env.BILLING_TRIAL_DAYS || 5),
+    // Dias de acesso após o vencimento do mês pago (não vale para o teste).
+    graceDays: Number(process.env.BILLING_GRACE_DAYS || 2),
   },
 
   paymentMethods: {

@@ -16,13 +16,18 @@ import {
 } from "../../controllers/addresses.js";
 
 
-const router = Router();
+import { authenticate, requireSelfOrAdmin } from "../../middlewares/auth.js";
 
-router.post("/createAddressesUser/:userId", createAddressesUser) 
+const router = Router();
+const selfOrAdmin = requireSelfOrAdmin((req) => req.params.userId);
+
+router.use(authenticate);
+
+router.post("/createAddressesUser/:userId", selfOrAdmin, createAddressesUser) 
 router.get("/one/:addressId", getAddressById);
-router.get("/user/:userId", getUserAddresses); // Listar endereços do usuário
+router.get("/user/:userId", selfOrAdmin, getUserAddresses); // Listar endereços do usuário
 router.put("/update/:addressId", updateAddress); // Atualizar endereço
 router.delete("/delete/:addressId", deleteAddress); // Deletar endereço
-router.put("/setDefault/:userId/:addressId", setDefaultAddress); // Definir como padrão
+router.put("/setDefault/:userId/:addressId", selfOrAdmin, setDefaultAddress); // Definir como padrão
 
 export default router;

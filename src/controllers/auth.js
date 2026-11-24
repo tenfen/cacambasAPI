@@ -2,6 +2,7 @@
 import bcrypt from 'bcrypt';
 import UsersModel from "../models/users.js";
 import { generateAuthToken } from "../helpers/token.js";
+import { refreshAccountStatus } from "../services/accountAccessService.js";
 
 export function signIn(req, res) {
     return res.status(200).send(req.decoded);
@@ -17,8 +18,12 @@ export function refreshToken(req, res) {
 
 export async function autenthicate(req, res) {
     const {userEmail, userPass} = req.body;
+    if (typeof userEmail !== "string" || typeof userPass !== "string") {
+      return res.status(400).send({ error: "Email e senha são obrigatórios." });
+    }
+
     try{
-      const user = await UsersModel.findOne({ userEmail }).select('+userPass'); 
+      let user = await UsersModel.findOne({ userEmail }).select('+userPass'); 
       if(!user)
       return res.status(400).send({error: 'Usuário não encontrado!'});
 
@@ -37,24 +42,9 @@ export async function autenthicate(req, res) {
         return res.status(400).send({ error: 'Senha inválida!' });
       }
 
-      /*
-       * Expira o teste grátis "de forma preguiçosa": em vez de um job
-       * rodando em background, checa no momento do login (mesmo padrão
-       * já usado pra checagem de pagamento no frontend).
-       */
-      if (
-        user.accountStatus === "trial" &&
-        user.trialEndsAt &&
-        user.trialEndsAt < new Date()
-      ) {
-        user.accountStatus = "pending_payment";
-        user.userActive = false;
+      // Aplica o vencimento do teste grátis ou do mês pago.
+      user = await refreshAccountStatus(user);
 
-        await UsersModel.updateOne(
-          { userId: user.userId },
-          { $set: { accountStatus: "pending_payment", userActive: false } }
-        );
-      }
       // Se a senha era texto plano, atualiza com hash bcrypt
       if (!senhaCriptografada) {
         const hashedPassword = await bcrypt.hash(userPass, 10);
@@ -70,6 +60,8 @@ export async function autenthicate(req, res) {
       
       // Garantir que notificationsEnabled seja retornado
       const userResponse = user.toObject();
+      delete userResponse.twoFactorCode;
+      delete userResponse.twoFactorCodeExpires;
       if (userResponse.notificationsEnabled === undefined) {
         userResponse.notificationsEnabled = true; // Valor padrão
       }

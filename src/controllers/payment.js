@@ -9,6 +9,11 @@ import {
   getMercadoPagoPayment,
 } from "../services/mercadoPagoService.js";
 
+import {
+  applyApprovedPayment,
+  revertPayment,
+} from "../services/accountAccessService.js";
+
 import { BILLING_CONFIG } from "../config/billing.js";
 
 function safeEqual(valueA, valueB) {
@@ -297,84 +302,42 @@ export async function mercadoPagoWebhook(req, res) {
       });
     }
 
-    payment.providerPaymentId = String(mercadoPagoPayment.id);
-    payment.status = mercadoPagoPayment.status;
-    payment.statusDetail =
-      mercadoPagoPayment.status_detail || null;
-    payment.paymentMethod =
-      mercadoPagoPayment.payment_method_id || null;
-    payment.rawPaymentData = mercadoPagoPayment;
-    payment.rawWebhookData = req.body;
+    const providerPaymentId = String(mercadoPagoPayment.id);
+    const status = mercadoPagoPayment.status;
 
-    if (mercadoPagoPayment.status === "approved") {
-      payment.paidAt = new Date();
+    /*
+     * Uma mesma cobrança pode ter várias tentativas. Uma recusa não pode
+     * apagar o registro de outra tentativa que já foi aprovada.
+     */
+    const outraTentativaJaPaga =
+      payment.status === "approved" &&
+      payment.providerPaymentId !== providerPaymentId &&
+      status !== "approved";
+
+    /*
+     * O acesso é atualizado antes de salvar o pagamento: se algo falhar, o
+     * Mercado Pago reenvia a notificação e nada é aplicado duas vezes.
+     * Recusa e cancelamento só são registrados, sem afetar a conta.
+     */
+    if (status === "approved") {
+      await applyApprovedPayment(payment, providerPaymentId);
+    } else if (["refunded", "charged_back"].includes(status)) {
+      await revertPayment(payment, providerPaymentId, status);
     }
 
-    await payment.save();
+    if (!outraTentativaJaPaga) {
+      payment.providerPaymentId = providerPaymentId;
+      payment.status = status;
+      payment.statusDetail = mercadoPagoPayment.status_detail || null;
+      payment.paymentMethod = mercadoPagoPayment.payment_method_id || null;
+      payment.rawPaymentData = mercadoPagoPayment;
+      payment.rawWebhookData = req.body;
 
-    const user = await UserModel.findOne({
-      userId: payment.userId,
-    });
+      if (status === "approved" && !payment.paidAt) {
+        payment.paidAt = new Date();
+      }
 
-    if (!user) {
-      return res.status(200).json({
-        success: true,
-        message: "Pagamento processado, usuário não encontrado.",
-      });
-    }
-
-    if (mercadoPagoPayment.status === "approved") {
-      const now = new Date();
-
-      /*
-       * Renovação antecipada: se o período atual ainda não venceu,
-       * soma o novo mês a partir do vencimento existente em vez de
-       * a partir de hoje, para não descartar os dias que já foram pagos.
-       */
-      const periodoAtualAindaValido =
-        user.currentPeriodEnd && new Date(user.currentPeriodEnd) > now;
-
-      const periodStart = now;
-      const periodEnd = new Date(
-        periodoAtualAindaValido ? user.currentPeriodEnd : now
-      );
-
-      periodEnd.setMonth(periodEnd.getMonth() + 1);
-
-      await UserModel.updateOne(
-        { userId: payment.userId },
-        {
-          $set: {
-            userActive: true,
-            accountStatus: "active",
-            subscriptionStatus: "active",
-            billingProvider: "mercadopago",
-            currentPeriodStart: periodStart,
-            currentPeriodEnd: periodEnd,
-            lastPaymentId: payment._id,
-            lastPaymentStatus: "approved",
-          },
-        }
-      );
-    }
-
-    if (
-      ["rejected", "cancelled", "refunded", "charged_back"].includes(
-        mercadoPagoPayment.status
-      )
-    ) {
-      await UserModel.updateOne(
-        { userId: payment.userId },
-        {
-          $set: {
-            userActive: false,
-            accountStatus: "suspended",
-            subscriptionStatus: "overdue",
-            lastPaymentId: payment._id,
-            lastPaymentStatus: mercadoPagoPayment.status,
-          },
-        }
-      );
+      await payment.save();
     }
 
     return res.status(200).json({

@@ -52,15 +52,14 @@ const ClienteSchema = new Schema(
     clienteDataEntrada: { type: Date, required: false, default: null },
 
     /**
-     * Data prevista para retirada/recolhimento da caçamba (some pra data
-     * real assim que o recolhimento é confirmado).
+     * Data prevista para retirada. Limpa no recolhimento: o histórico
+     * fica na coleção "locacoes".
      */
     clienteDataSaida: { type: Date, required: false, default: null },
 
     /**
-     * Valor faturado nesse aluguel, calculado e congelado no momento do
-     * recolhimento (dias alugados × diária da caçamba na época) — depois
-     * disso o bucketId é zerado e não dá mais pra recalcular.
+     * Formato antigo, só leitura: usado para converter os aluguéis feitos
+     * antes da coleção "locacoes".
      */
     clienteValorFaturado: { type: Number, required: false, default: null },
 

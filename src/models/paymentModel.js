@@ -69,6 +69,7 @@ const PaymentSchema = new Schema(
         "approved",
         "authorized",
         "in_process",
+        "in_mediation",
         "rejected",
         "cancelled",
         "refunded",
