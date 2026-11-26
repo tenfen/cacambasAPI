@@ -102,8 +102,14 @@ export async function abrirLocacao(cliente, { bucketId, dataEntrada, dataPrevist
       dataPrevista,
     });
   } catch (err) {
-    if (err?.code === CODIGO_DUPLICADO) throw new CacambaOcupadaError(bucket.bucketName);
-    throw err;
+    if (err?.code !== CODIGO_DUPLICADO) throw err;
+
+    // Índice antigo ainda presente: não significa caçamba ocupada.
+    if (err.keyPattern?.clienteId) {
+      throw new LocacaoError("O sistema ainda está sendo atualizado. Tente de novo em alguns minutos.");
+    }
+
+    throw new CacambaOcupadaError(bucket.bucketName);
   }
 }
 

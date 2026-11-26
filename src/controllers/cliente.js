@@ -179,6 +179,12 @@ export async function updateCliente(req, res) {
 
     const update = { ...pick(req.body, CLIENTE_FIELDS), updateAt: new Date() };
 
+    // Formulário antigo, de uma caçamba só: recusa em vez de ignorar a
+    // caçamba e responder que salvou.
+    if (Object.hasOwn(req.body, "bucketId")) {
+      throw new LocacaoError("Esta página está desatualizada. Atualize com Ctrl+F5 e tente de novo.");
+    }
+
     const locacoes = lerLocacoes(req.body.locacoes);
 
     /*

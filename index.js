@@ -92,7 +92,10 @@ app.get("/", (req, res) => {
 });
 
 app.get("/healthz", (req, res) => {
-  res.success("Healthz OK");
+  // O commit permite conferir qual versão está no ar.
+  res.success("Healthz OK", {
+    commit: process.env.RENDER_GIT_COMMIT?.slice(0, 7) ?? null,
+  });
 });
 
 // Precisa ser o último app.use: captura qualquer erro (síncrono ou de rota
